@@ -1,0 +1,55 @@
+import json
+from urllib.parse import parse_qs
+import boto3
+import os
+
+# Initialize SQS client
+sqs_client = boto3.client("sqs")
+
+# Constants
+SLACK_VERIFICATION_TOKEN = os.environ["SLACK_VERIFICATION_TOKEN"]
+SQS_QUEUE_URL = os.environ["SQS_QUEUE_URL"]
+
+
+def lambda_handler(event, context):
+    """Main Lambda handler for Slack interaction."""
+    print(f"Received event: {json.dumps(event)}")
+
+    # Parse and verify Slack request
+    try:
+        body = event["body"]
+        params = parse_qs(body)
+        token = params["token"][0]
+        user_prompt = params.get("text", [""])[0]
+        response_url = params["response_url"][0]
+
+        if token != SLACK_VERIFICATION_TOKEN:
+            raise ValueError("Invalid Slack verification token")
+
+        print(f"Received user prompt: {user_prompt}")
+    except (KeyError, ValueError, IndexError) as e:
+        print(f"Error parsing request body: {e}")
+        return {"statusCode": 400, "body": "Invalid request body"}
+
+    # Publish the user query and response URL to SQS
+    try:
+        sqs_message = {
+            "user_prompt": user_prompt,
+            "response_url": response_url,
+        }
+        sqs_client.send_message(
+            QueueUrl=SQS_QUEUE_URL,
+            MessageBody=json.dumps(sqs_message),
+        )
+        print("Message published to SQS successfully.")
+    except Exception as e:
+        print(f"Error sending message to SQS: {e}")
+        return {"statusCode": 500, "body": "Error sending message to SQS"}
+
+    # Respond to Slack immediately
+    # ack_response = {
+    #     "response_type": "ephemeral",
+    #     "text": "Processing your request. You will receive a response shortly.",
+    # }
+    # return {"statusCode": 200, "body": json.dumps(ack_response)}
+    return {"statusCode": 200}
